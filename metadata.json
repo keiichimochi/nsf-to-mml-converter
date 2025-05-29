@@ -1,0 +1,6 @@
+{
+  "name": "NSF to MML Converter (Simulated)",
+  "description": "A web application to parse NSF (NES Sound Format) files, display header information, and demonstrate a *simulated* conversion of song data to MML (Music Macro Language). Users can view, copy, and download the MML. The actual NSF emulation and MML generation logic is highly complex and is represented by placeholder data in this demonstration version.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
