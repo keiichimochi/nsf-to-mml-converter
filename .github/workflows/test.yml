@@ -1,0 +1,142 @@
+name: 🤖 ClaudeCode 自動コードレビューナリ
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main, develop]
+
+jobs:
+  code-review:
+    runs-on: self-hosted  # セルフホストランナーを使用ナリ！
+    
+    steps:
+    - name: 📥 コードをチェックアウトナリ
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # 全履歴を取得してdiffを見るナリ
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: 🔍 変更されたファイルを取得ナリ
+      id: changed-files
+      run: |
+        # PRで変更されたファイル一覧を取得ナリ
+        git diff --name-only origin/${{ github.base_ref }}..HEAD > changed_files.txt
+        echo "changed-files=$(cat changed_files.txt | tr '\n' ' ')" >> $GITHUB_OUTPUT
+        echo "📝 変更されたファイル:"
+        cat changed_files.txt
+
+    - name: 🔍 Claude認証状態確認ナリ
+      run: |
+        echo "🔍 ClaudeMAXプランの認証状態をチェックナリ..."
+        ./check_claude_auth.sh
+
+    - name: 🚀 ClaudeCode でコードレビュー実行ナリ（MAXプラン）
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        PR_NUMBER: ${{ github.event.number }}
+        REPO_OWNER: ${{ github.repository_owner }}
+        REPO_NAME: ${{ github.event.repository.name }}
+        # ClaudeMAXプランはローカル認証を使用ナリ
+      run: |
+        echo "🎯 ClaudeMAXプランでClaudeCode自動レビュー開始ナリ！"
+        
+        # 変更されたファイルをClaudeCodeで解析ナリ
+        for file in ${{ steps.changed-files.outputs.changed-files }}; do
+          if [[ -f "$file" ]]; then
+            echo "🔍 $file を解析中ナリ..."
+            
+            # ClaudeCodeでファイル解析＆レビューナリ
+            claude-code review "$file" \
+              --context "NSF to MML converter project" \
+              --focus "code quality, performance, security, best practices" \
+              --output-format "github-comment" \
+              --save-to "review_${file//\//_}.md"
+          fi
+        done
+
+    - name: 📝 PRにレビューコメント投稿ナリ
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # レビュー結果をPRにコメントとして投稿ナリ
+        echo "📋 レビュー結果をPRに投稿するナリ！"
+        
+        # レビューコメントを結合ナリ
+        echo "## 🤖 ClaudeCode 自動レビュー結果ナリ！" > final_review.md
+        echo "" >> final_review.md
+        echo "### 📊 解析対象ファイル" >> final_review.md
+        echo "${{ steps.changed-files.outputs.changed-files }}" | tr ' ' '\n' | sed 's/^/- /' >> final_review.md
+        echo "" >> final_review.md
+        
+        # 各ファイルのレビュー結果を追加ナリ
+        for review_file in review_*.md; do
+          if [[ -f "$review_file" ]]; then
+            echo "### 📄 $(echo $review_file | sed 's/review_//;s/_/\//g;s/\.md$//')" >> final_review.md
+            cat "$review_file" >> final_review.md
+            echo "" >> final_review.md
+          fi
+        done
+        
+        # GitHub APIでPRにコメント投稿ナリ
+        gh pr comment ${{ github.event.number }} \
+          --body-file final_review.md \
+          --repo ${{ github.repository }}
+
+    - name: 🔍 静的解析実行ナリ
+      run: |
+        echo "🔬 追加の静的解析を実行するナリ！"
+        
+        # ESLint実行（JavaScriptプロジェクトの場合）
+        if [[ -f "package.json" ]]; then
+          npm install
+          npm run lint || echo "⚠️ Lint warnings found"
+        fi
+        
+        # ClaudeCodeで包括的な静的解析ナリ
+        claude-code analyze . \
+          --type "static-analysis" \
+          --include-patterns "*.js,*.ts,*.py,*.cpp,*.h" \
+          --exclude-patterns "node_modules,dist,build" \
+          --output "static_analysis_report.md"
+
+    - name: 📊 解析レポート作成ナリ
+      if: always()
+      run: |
+        echo "📈 最終レポートを作成するナリ！"
+        
+        # 解析サマリーを作成ナリ
+        echo "## 🎯 ClaudeCode 解析サマリーナリ！" > analysis_summary.md
+        echo "" >> analysis_summary.md
+        echo "- **PR番号**: #${{ github.event.number }}" >> analysis_summary.md
+        echo "- **解析日時**: $(date)" >> analysis_summary.md
+        echo "- **変更ファイル数**: $(echo '${{ steps.changed-files.outputs.changed-files }}' | wc -w)" >> analysis_summary.md
+        echo "" >> analysis_summary.md
+        
+        if [[ -f "static_analysis_report.md" ]]; then
+          echo "### 🔬 静的解析結果" >> analysis_summary.md
+          cat static_analysis_report.md >> analysis_summary.md
+        fi
+        
+        # レポートをArtifactとして保存ナリ
+        echo "💾 レポートをアーティファクトとして保存ナリ！"
+        
+    - name: 📤 レポートをアーティファクトとして保存ナリ
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: claudecode-review-report-${{ github.event.number }}
+        path: |
+          *.md
+          review_*.md
+        retention-days: 30
+
+    - name: 🎉 完了通知ナリ
+      if: success()
+      run: |
+        echo "✅ ClaudeCode 自動レビュー完了ナリ！"
+        echo "📋 PR #${{ github.event.number }} のレビューが完了したナリ！"
+        
+        # Slackに通知（オプション）
+        # curl -X POST -H 'Content-type: application/json' \
+        #   --data '{"text":"🤖 ClaudeCode レビュー完了ナリ！ PR #${{ github.event.number }}"}' \
+        #   ${{ secrets.SLACK_WEBHOOK_URL }}
